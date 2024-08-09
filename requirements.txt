@@ -1,3 +1,7 @@
 streamlit
-google-cloud-translate
+streamlit-webrtc
 google-cloud-speech
+google-cloud-translate
+numpy
+pandas
+av
