@@ -1,3 +1,8 @@
+import logging
+
+# Enable logging
+logging.basicConfig(level=logging.DEBUG)
+
 import streamlit as st
 import tempfile
 import csv
@@ -10,6 +15,7 @@ import numpy as np
 import av
 
 # Initialize Google Cloud clients
+logging.debug("Initializing Google Cloud clients...")
 translate_client = translate.Client()
 speech_client = speech.SpeechClient()
 
@@ -23,6 +29,7 @@ class AudioProcessor(AudioProcessorBase):
     def __init__(self):
         self.recording = []
         self.sampling_rate = 16000  # Set to 16kHz for Google Speech API
+        logging.debug("AudioProcessor initialized.")
 
     def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
         audio = frame.to_ndarray()
@@ -31,6 +38,7 @@ class AudioProcessor(AudioProcessorBase):
 
     def get_wav_bytes(self):
         audio_data = np.concatenate(self.recording, axis=1)
+        logging.debug(f"Captured {len(audio_data)} bytes of audio.")
         return audio_data.tobytes()
 
 # Function to save data to CSV
@@ -50,6 +58,7 @@ def save_to_csv(transcript, translated_text, filename="reports.csv"):
     st.success(f"Data saved to {filename}")
 
 # Streamlit app UI
+logging.debug("Starting Streamlit app...")
 st.title("Real-Time Speech-to-Text and Translation")
 
 # Record audio using the webrtc_streamer component
@@ -60,6 +69,7 @@ target_language = st.selectbox("Select target language", ["en", "es", "fr", "de"
 
 if webrtc_ctx.audio_processor:
     if st.button("Process Audio"):
+        logging.debug("Processing audio...")
         with tempfile.NamedTemporaryFile(suffix=".wav") as f:
             f.write(webrtc_ctx.audio_processor.get_wav_bytes())
             f.flush()
@@ -86,6 +96,7 @@ if webrtc_ctx.audio_processor:
 
                 # Save to CSV
                 save_to_csv(transcript, translated_text)
+                logging.debug("Saved transcript and translation to CSV.")
             else:
                 st.write("No transcription found.")
 
@@ -98,3 +109,5 @@ if os.path.isfile("reports.csv"):
         file_name="reports.csv",
         mime="text/csv",
     )
+
+logging.debug("Streamlit app finished loading.")
