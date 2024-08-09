@@ -1,113 +1,97 @@
-import logging
-
-# Enable logging
-logging.basicConfig(level=logging.DEBUG)
-
 import streamlit as st
-import tempfile
-import csv
-import os
-import pandas as pd
 from google.cloud import translate_v2 as translate
 from google.cloud import speech
-from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
-import numpy as np
-import av
+from gtts import gTTS
+import tempfile
+import os
+import base64
+from io import BytesIO
 
 # Initialize Google Cloud clients
-logging.debug("Initializing Google Cloud clients...")
 translate_client = translate.Client()
 speech_client = speech.SpeechClient()
 
-# Function to translate text
+# Helper functions
 def translate_text(text, target_language='en'):
     result = translate_client.translate(text, target_language=target_language)
     return result['translatedText']
 
-# Custom audio processor class
-class AudioProcessor(AudioProcessorBase):
-    def __init__(self):
-        self.recording = []
-        self.sampling_rate = 16000  # Set to 16kHz for Google Speech API
-        logging.debug("AudioProcessor initialized.")
-
-    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
-        audio = frame.to_ndarray()
-        self.recording.append(audio)
-        return frame
-
-    def get_wav_bytes(self):
-        audio_data = np.concatenate(self.recording, axis=1)
-        logging.debug(f"Captured {len(audio_data)} bytes of audio.")
-        return audio_data.tobytes()
-
-# Function to save data to CSV
-def save_to_csv(transcript, translated_text, filename="reports.csv"):
-    file_exists = os.path.isfile(filename)
-
-    with open(filename, mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        
-        # Write the header if the file is new
-        if not file_exists:
-            writer.writerow(["Transcription", "Translated Text"])
-        
-        # Write the data
-        writer.writerow([transcript, translated_text])
-
-    st.success(f"Data saved to {filename}")
-
-# Streamlit app UI
-logging.debug("Starting Streamlit app...")
-st.title("Real-Time Speech-to-Text and Translation")
-
-# Record audio using the webrtc_streamer component
-webrtc_ctx = webrtc_streamer(key="speech", audio_processor_factory=AudioProcessor, media_stream_constraints={"audio": True, "video": False})
-
-# Text input for language selection
-target_language = st.selectbox("Select target language", ["en", "es", "fr", "de", "zh", "ja"])
-
-if webrtc_ctx.audio_processor:
-    if st.button("Process Audio"):
-        logging.debug("Processing audio...")
-        with tempfile.NamedTemporaryFile(suffix=".wav") as f:
-            f.write(webrtc_ctx.audio_processor.get_wav_bytes())
-            f.flush()
-
-            with open(f.name, "rb") as audio_file:
-                content = audio_file.read()
-
-            # Google Speech-to-Text API
-            audio = speech.RecognitionAudio(content=content)
-            config = speech.RecognitionConfig(
-                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                sample_rate_hertz=16000,
-                language_code="en-US",  # Change this based on your desired input language
-            )
-
-            response = speech_client.recognize(config=config, audio=audio)
-            if response.results:
-                transcript = response.results[0].alternatives[0].transcript
-                st.write("Transcription:", transcript)
-
-                # Translate the text
-                translated_text = translate_text(transcript, target_language=target_language)
-                st.write("Translated Text:", translated_text)
-
-                # Save to CSV
-                save_to_csv(transcript, translated_text)
-                logging.debug("Saved transcript and translation to CSV.")
-            else:
-                st.write("No transcription found.")
-
-# Add a button to download the CSV file
-if os.path.isfile("reports.csv"):
-    df = pd.read_csv("reports.csv")
-    st.download_button(
-        label="Download Reports CSV",
-        data=df.to_csv(index=False),
-        file_name="reports.csv",
-        mime="text/csv",
+def speech_to_text(audio_content):
+    audio = speech.RecognitionAudio(content=audio_content)
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+        sample_rate_hertz=16000,
+        language_code="en-US",
     )
+    response = speech_client.recognize(config=config, audio=audio)
+    return response.results[0].alternatives[0].transcript if response.results else ""
 
-logging.debug("Streamlit app finished loading.")
+def text_to_speech(text, lang='en'):
+    tts = gTTS(text=text, lang=lang)
+    tts.save("output.mp3")
+    with open("output.mp3", "rb") as audio_file:
+        audio_bytes = audio_file.read()
+    return audio_bytes
+
+# App UI
+st.title("Incident Reporting System")
+
+st.header("Select Report Types")
+report_types = st.multiselect(
+    "Choose the types of incidents you want to report:",
+    ["Suspicious Behavior", "Illegal Content", "Request to Move to Private Channel"]
+)
+
+confidence_level = st.slider("Confidence Level:", 0, 100, 50)
+
+st.header("Additional Information")
+platform = st.text_input("Platform (e.g., Website, App)")
+times = st.text_input("Times (e.g., Specific hours)")
+frequency = st.text_input("Frequency (e.g., Daily, Weekly)")
+
+st.header("Details")
+free_text = st.text_area("Provide additional details")
+
+# Speech-to-text for free text field
+if st.button("Use Speech-to-Text"):
+    uploaded_file = st.file_uploader("Upload audio file (WAV format)", type="wav")
+    if uploaded_file:
+        audio_content = uploaded_file.read()
+        transcription = speech_to_text(audio_content)
+        st.write("Transcribed Text:")
+        st.write(transcription)
+        free_text = transcription
+
+# Language Translation
+st.header("Translation")
+target_language = st.selectbox("Translate to language", ["en", "es", "fr", "de", "zh", "ja"])
+
+if st.button("Translate Report"):
+    translated_report = translate_text(free_text, target_language)
+    st.write("Translated Report:")
+    st.write(translated_report)
+
+    # Text-to-Speech for the translated report
+    st.audio(text_to_speech(translated_report, lang=target_language))
+
+# Option to submit anonymously or with details
+submit_anonymous = st.checkbox("Submit Anonymously")
+
+if submit_anonymous:
+    st.success("You have chosen to submit anonymously.")
+else:
+    user_details = st.text_input("Please provide your contact details (optional)")
+
+# Submit Button
+if st.button("Submit Report"):
+    st.write("Your report has been submitted with the following details:")
+    st.write(f"Report Types: {', '.join(report_types)}")
+    st.write(f"Confidence Level: {confidence_level}")
+    st.write(f"Platform: {platform}")
+    st.write(f"Times: {times}")
+    st.write(f"Frequency: {frequency}")
+    st.write(f"Details: {free_text}")
+    if not submit_anonymous:
+        st.write(f"User Details: {user_details}")
+
+    st.success("Thank you for your report!")
