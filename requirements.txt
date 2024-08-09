@@ -1,7 +1,7 @@
-streamlit
-streamlit-webrtc
+Flask
 google-cloud-speech
 google-cloud-translate
+google-cloud-texttospeech
 numpy
 pandas
 av
